@@ -1,39 +1,50 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
-import "./ProductList.css"; // your existing styling
+import "./ProductList.css";
 
 const ProductList = () => {
+  const navigate = useNavigate();
+
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // filters
   const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("All");
+  const [placeSearch, setPlaceSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All");
 
-  // Get logged-in user or admin from localStorage
-  const user = JSON.parse(localStorage.getItem("user"));
-  const admin = JSON.parse(localStorage.getItem("admin"));
+  const [user, setUser] = useState(null);
+  const [admin, setAdmin] = useState(null);
 
+  // Fetch logged-in user/admin
+  useEffect(() => {
+    const storedUser = JSON.parse(localStorage.getItem("user"));
+    const storedAdmin = JSON.parse(localStorage.getItem("admin"));
+    setUser(storedUser);
+    setAdmin(storedAdmin);
+  }, []);
+
+  // Fetch products
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const res = await axios.get("http://localhost:5000/api/products");
+        const headers = {};
+        if (user) headers.user = JSON.stringify(user);
+        if (admin) headers.admin = JSON.stringify(admin);
+
+        const res = await axios.get("http://localhost:5000/api/products", { headers });
         setProducts(res.data);
-        setFilteredProducts(res.data); // default
+        setFilteredProducts(res.data);
+        setLoading(false);
       } catch (err) {
         console.error("Error fetching products:", err);
-        setError("Failed to fetch products. Please try again.");
-      } finally {
         setLoading(false);
       }
     };
-
     fetchProducts();
-  }, []);
+  }, [user, admin]);
 
-  // Apply filters whenever search/category changes
+  // Filter logic
   useEffect(() => {
     let result = products;
 
@@ -43,71 +54,98 @@ const ProductList = () => {
       );
     }
 
-    if (category !== "All") {
-      result = result.filter((p) => p.category === category);
+    if (placeSearch.trim() !== "") {
+      result = result.filter((p) =>
+        p.place && p.place.toLowerCase().includes(placeSearch.toLowerCase())
+      );
+    }
+
+    if (categoryFilter !== "All") {
+      result = result.filter((p) => p.category === categoryFilter);
     }
 
     setFilteredProducts(result);
-  }, [search, category, products]);
+  }, [search, placeSearch, categoryFilter, products]);
 
-  const handleDelete = async (productId) => {
+  // Delete product
+  const handleDelete = async (id) => {
+    if (window.confirm("Are you sure you want to delete this product?")) {
+      try {
+        const headers = {};
+        if (user) headers.user = JSON.stringify(user);
+        if (admin) headers.admin = JSON.stringify(admin);
+
+        await axios.delete(`http://localhost:5000/api/products/${id}`, { headers });
+        setProducts(products.filter((p) => p._id !== id));
+      } catch (err) {
+        console.error("Error deleting product:", err);
+        alert("Failed to delete product. Try again.");
+      }
+    }
+  };
+
+  // Toggle availability
+  const handleToggleAvailability = async (id) => {
     try {
-      // Send proper header depending on admin/user
       const headers = {};
-      if (admin) headers.admin = JSON.stringify(admin);
       if (user) headers.user = JSON.stringify(user);
+      if (admin) headers.admin = JSON.stringify(admin);
 
-      await axios.delete(`http://localhost:5000/api/products/${productId}`, { headers });
+      await axios.put(
+        `http://localhost:5000/api/products/${id}/toggle-availability`,
+        {},
+        { headers }
+      );
 
-      alert("Product deleted successfully");
-
-      // Update state after deletion
-      setProducts(products.filter((p) => p._id !== productId));
-      setFilteredProducts(filteredProducts.filter((p) => p._id !== productId));
+      setProducts(
+        products.map((p) =>
+          p._id === id ? { ...p, available: !p.available } : p
+        )
+      );
     } catch (err) {
-      console.error(err);
-      alert(err.response?.data?.message || "Error deleting product");
+      console.error("Error toggling availability:", err);
+      alert("Failed to change availability. Please try again.");
     }
   };
 
   if (loading) {
-    return (
-      <div className="container">
-        <h2>Loading products...</h2>
-      </div>
-    );
+    return <div className="loading">Loading products...</div>;
   }
-
-  if (error) {
-    return (
-      <div className="container">
-        <h2>{error}</h2>
-      </div>
-    );
-  }
-
-  const categories = ["All", ...new Set(products.map((p) => p.category))];
 
   return (
-    <div className="container">
+    <div className="product-list-container">
       <h2>Available Products</h2>
 
+      {/* Filter controls */}
       <div className="filters">
         <input
           type="text"
-          placeholder="Search products..."
+          placeholder="Search by name..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <select value={category} onChange={(e) => setCategory(e.target.value)}>
-          {categories.map((c, idx) => (
-            <option key={idx} value={c}>
-              {c}
-            </option>
-          ))}
+
+        <input
+          type="text"
+          placeholder="Search by place..."
+          value={placeSearch}
+          onChange={(e) => setPlaceSearch(e.target.value)}
+        />
+
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+        >
+          <option value="All">All Categories</option>
+          <option value="Electronics">Electronics</option>
+          <option value="Sports">Sports</option>
+          <option value="Gadgets">Gadgets</option>
+          <option value="Furniture">Furniture</option>
+          <option value="Others">Others</option>
         </select>
       </div>
 
+      {/* Product Grid */}
       <div className="product-grid">
         {filteredProducts.length === 0 ? (
           <p>No products found.</p>
@@ -123,29 +161,54 @@ const ProductList = () => {
               ) : (
                 <div className="no-image">No Image</div>
               )}
+
               <h3>{prod.name}</h3>
-              <p>{prod.description}</p>
-              <p>
-                <strong>Category:</strong> {prod.category}
-              </p>
-              <p>
-                <strong>Price:</strong> ₹{prod.price}
-              </p>
-              <p>
-                <strong>Deposit:</strong> ₹{prod.deposit}
-              </p>
+              <p><strong>Category:</strong> {prod.category}</p>
+              <p><strong>Price:</strong> ₹{prod.price}</p>
+              <p><strong>Deposit:</strong> ₹{prod.deposit}</p>
+              <p><strong>Place:</strong> {prod.place}</p>
+              <p><strong>Description:</strong> {prod.description}</p>
 
-              <button className="rent-btn">Rent Now</button>
+              {/* Rent Button: redirect if not logged in */}
+              <button
+                className="rent-btn"
+                onClick={() => {
+                  if (user) {
+                    navigate(`/rent/${prod._id}`);
+                  } else {
+                    navigate("/login");
+                  }
+                }}
+              >
+                Rent Now
+              </button>
 
-              {/* Show Delete button if admin OR product belongs to logged-in user */}
-              {(admin || (user && prod.userId === user._id)) && (
-                <button
-                  className="delete-btn"
-                  onClick={() => handleDelete(prod._id)}
-                  style={{ marginTop: "10px", backgroundColor: "red", color: "white" }}
-                >
-                  Delete
-                </button>
+              {(admin || (user && prod.userId?.toString() === user._id)) && (
+                <>
+                  <button
+                    className="delete-btn"
+                    onClick={() => handleDelete(prod._id)}
+                    style={{
+                      marginTop: "10px",
+                      backgroundColor: "red",
+                      color: "white",
+                    }}
+                  >
+                    Delete
+                  </button>
+
+                  <button
+                    className="availability-btn"
+                    onClick={() => handleToggleAvailability(prod._id)}
+                    style={{
+                      marginTop: "10px",
+                      backgroundColor: prod.available ? "orange" : "green",
+                      color: "white",
+                    }}
+                  >
+                    {prod.available ? "Make Unavailable" : "Make Available"}
+                  </button>
+                </>
               )}
             </div>
           ))

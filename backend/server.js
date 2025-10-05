@@ -27,8 +27,8 @@ mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log("MongoDB connected"))
-.catch((err) => console.log(err));
+  .then(() => console.log("MongoDB connected"))
+  .catch((err) => console.log(err));
 
 // ------------------- USER ROUTES -------------------
 
@@ -36,7 +36,6 @@ mongoose.connect(process.env.MONGO_URI, {
 app.post("/api/users/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
-
     if (!name || !email || !password)
       return res.status(400).json({ message: "All fields are required" });
 
@@ -57,7 +56,6 @@ app.post("/api/users/register", async (req, res) => {
 app.post("/api/users/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password)
       return res.status(400).json({ message: "Email and password required" });
 
@@ -75,11 +73,10 @@ app.post("/api/users/login", async (req, res) => {
 
 // ------------------- ADMIN ROUTES -------------------
 
-// Register admin (optional)
+// Register admin
 app.post("/api/admin/register", async (req, res) => {
   try {
     const { username, password } = req.body;
-
     if (!username || !password)
       return res.status(400).json({ message: "Username and password required" });
 
@@ -100,7 +97,6 @@ app.post("/api/admin/register", async (req, res) => {
 app.post("/api/admin/login", async (req, res) => {
   try {
     const { username, password } = req.body;
-
     if (!username || !password)
       return res.status(400).json({ message: "Username and password required" });
 
@@ -118,7 +114,6 @@ app.post("/api/admin/login", async (req, res) => {
 
 // ------------------- PRODUCT ROUTES -------------------
 
-// Product Schema
 const productSchema = new mongoose.Schema({
   name: String,
   category: String,
@@ -127,6 +122,9 @@ const productSchema = new mongoose.Schema({
   description: String,
   image: String,
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  ownerNumber: { type: String, required: true },
+  available: { type: Boolean, default: true },
+  place: { type: String, required: true }, // ✅ NEW FIELD
 });
 
 const Product = mongoose.model("Product", productSchema);
@@ -147,20 +145,31 @@ const upload = multer({ storage });
 // Get all products
 app.get("/api/products", async (req, res) => {
   try {
-    const products = await Product.find();
+    const userHeader = req.headers.user;
+    const adminHeader = req.headers.admin;
+
+    let products = await Product.find();
+
+    if (!adminHeader && !userHeader) {
+      products = products.filter(p => p.available);
+    } else if (userHeader) {
+      const user = JSON.parse(userHeader);
+      products = products.filter(p => p.available || p.userId.toString() === user._id.toString());
+    }
+
     res.json(products);
   } catch (err) {
+    console.error("Error in GET /products:", err);
     res.status(500).json({ message: "Failed to fetch products" });
   }
 });
 
-// Add product (only logged-in user)
+// Add product
 app.post("/api/products", upload.single("image"), async (req, res) => {
   try {
-    const { name, category, price, deposit, description, userId } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({ message: "You must be logged in to add a product" });
+    const { name, category, price, deposit, description, userId, ownerNumber, place } = req.body;
+    if (!userId || !ownerNumber || !place) {
+      return res.status(401).json({ message: "All fields including place are required" });
     }
 
     const product = new Product({
@@ -171,34 +180,35 @@ app.post("/api/products", upload.single("image"), async (req, res) => {
       description,
       image: req.file ? req.file.filename : null,
       userId,
+      ownerNumber,
+      place, // ✅ NEW FIELD
     });
 
     await product.save();
     res.json(product);
   } catch (err) {
+    console.error("Error in POST /products:", err);
     res.status(500).json({ message: "Failed to add product" });
   }
 });
 
-// Delete product (user or admin)
+// Delete product
 app.delete("/api/products/:id", async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
-    const userHeader = req.headers.user; // logged-in user
-    const adminHeader = req.headers.admin; // logged-in admin
+    const userHeader = req.headers.user;
+    const adminHeader = req.headers.admin;
 
-    // Admin can delete any product
     if (adminHeader) {
       await product.deleteOne();
       return res.json({ message: "Product deleted by admin successfully" });
     }
 
-    // Regular user can delete only their own product
     if (userHeader) {
       const user = JSON.parse(userHeader);
-      if (product.userId.toString() !== user._id)
+      if (product.userId.toString() !== user._id.toString())
         return res.status(403).json({ message: "You can only delete your own products" });
 
       await product.deleteOne();
@@ -207,6 +217,38 @@ app.delete("/api/products/:id", async (req, res) => {
 
     res.status(401).json({ message: "Unauthorized: user or admin required" });
   } catch (err) {
+    console.error("Error in DELETE /products/:id:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+// Toggle availability
+app.put("/api/products/:id/toggle-availability", async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ message: "Product not found" });
+
+    const userHeader = req.headers.user;
+    const adminHeader = req.headers.admin;
+
+    if (userHeader) {
+      const user = JSON.parse(userHeader);
+      if (product.userId.toString() !== user._id.toString()) {
+        return res.status(403).json({ message: "You can only update your own products" });
+      }
+    } else if (!adminHeader) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    product.available = !product.available;
+    await product.save();
+
+    res.json({
+      message: `Product is now ${product.available ? "available" : "unavailable"}`,
+      product,
+    });
+  } catch (err) {
+    console.error("Error in PUT /products/:id/toggle-availability:", err);
     res.status(500).json({ message: "Server error", error: err.message });
   }
 });

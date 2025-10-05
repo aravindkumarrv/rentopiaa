@@ -1,29 +1,41 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import "./ProductAdd.css";
 
 const ProductAdd = () => {
+  const navigate = useNavigate();
+
   const [name, setName] = useState("");
-  const [category, setCategory] = useState(""); 
+  const [category, setCategory] = useState("Electronics");
   const [price, setPrice] = useState("");
   const [deposit, setDeposit] = useState("");
   const [description, setDescription] = useState("");
   const [image, setImage] = useState(null);
-  const navigate = useNavigate();
+  const [ownerNumber, setOwnerNumber] = useState("");
+  const [place, setPlace] = useState(""); // ✅ New field
+  const [error, setError] = useState(null);
 
-  const categories = ["Electronics", "Sports", "Gadgets", "Furniture"];
+  const user = JSON.parse(localStorage.getItem("user"));
 
-  const loggedUser = JSON.parse(localStorage.getItem("user"));
-  if (!loggedUser) {
-    alert("Please login to add a product");
-    navigate("/login");
-  }
+  const categories = ["Electronics", "Sports", "Gadgets", "Furniture", "Other"];
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!user) {
+      alert("You must be logged in to add a product");
+      return;
+    }
 
-    if (!image) {
-      alert("Please select an image");
+    // Validate phone number
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(ownerNumber)) {
+      alert("Please enter a valid 10-digit phone number");
+      return;
+    }
+
+    if (!place.trim()) {
+      alert("Please enter the product location/place");
       return;
     }
 
@@ -33,80 +45,70 @@ const ProductAdd = () => {
     formData.append("price", price);
     formData.append("deposit", deposit);
     formData.append("description", description);
-    formData.append("image", image);
-    formData.append("userId", loggedUser._id); // include userId
+    formData.append("ownerNumber", ownerNumber);
+    formData.append("place", place); // ✅ Add place
+    formData.append("userId", user._id);
+    if (image) formData.append("image", image);
 
     try {
       await axios.post("http://localhost:5000/api/products", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      alert("Product added successfully!");
-
-      // Clear form
-      setName("");
-      setCategory("");
-      setPrice("");
-      setDeposit("");
-      setDescription("");
-      setImage(null);
-
+      alert("Product added successfully");
       navigate("/products");
     } catch (err) {
       console.error(err);
-      alert("Error adding product. Make sure your backend is running.");
+      setError(err.response?.data?.message || "Failed to add product");
     }
   };
 
   return (
     <div className="container">
-      <h2>Add Product</h2>
-      <form onSubmit={handleSubmit} encType="multipart/form-data">
-        <input
-          type="text"
-          placeholder="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
+      <h2>Add New Product</h2>
+      {error && <p className="error">{error}</p>}
 
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          required
-        >
-          <option value="">Select Category</option>
-          {categories.map((cat) => (
-            <option key={cat} value={cat}>{cat}</option>
+      <form className="product-form" onSubmit={handleSubmit}>
+        <label>Name:</label>
+        <input type="text" value={name} onChange={(e) => setName(e.target.value)} required />
+
+        <label>Category:</label>
+        <select value={category} onChange={(e) => setCategory(e.target.value)} required>
+          {categories.map((c, idx) => (
+            <option key={idx} value={c}>{c}</option>
           ))}
         </select>
 
+        <label>Price (₹):</label>
+        <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} required />
+
+        <label>Deposit (₹):</label>
+        <input type="number" value={deposit} onChange={(e) => setDeposit(e.target.value)} required />
+
+        <label>Description:</label>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} required />
+
+        <label>Place / Location:</label>
         <input
-          type="number"
-          placeholder="Price"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
+          type="text"
+          value={place}
+          onChange={(e) => setPlace(e.target.value)}
+          placeholder="Enter product location (e.g., Kochi, Chennai)"
           required
         />
+
+        <label>Owner Phone Number:</label>
         <input
-          type="number"
-          placeholder="Deposit"
-          value={deposit}
-          onChange={(e) => setDeposit(e.target.value)}
+          type="text"
+          value={ownerNumber}
+          onChange={(e) => setOwnerNumber(e.target.value)}
+          placeholder="Enter your 10-digit phone number"
           required
         />
-        <textarea
-          placeholder="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          required
-        />
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => setImage(e.target.files[0])}
-          required
-        />
-        <button type="submit">Add Product</button>
+
+        <label>Image:</label>
+        <input type="file" accept="image/*" onChange={(e) => setImage(e.target.files[0])} />
+
+        <button type="submit" className="add-btn">Add Product</button>
       </form>
     </div>
   );
